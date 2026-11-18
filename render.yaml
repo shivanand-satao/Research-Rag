@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: research-rag
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: APP_ENV
+        value: production
+      - key: FRONTEND_URL
+        value: https://research-rag-seven.vercel.app
+      - key: RESEARCH_REDIRECT_URL
+        value: https://research-rag-seven.vercel.app/auth/callback
+      - key: CORS_ORIGINS
+        value: https://research-rag-seven.vercel.app
+      - key: QDRANT_ALL_MINILM_L6_V2
+        value: "true"
+      - key: RESEARCH_RERANK_ENABLED
+        value: "false"
+      - key: OCR
+        value: "false"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false

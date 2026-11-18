@@ -1,0 +1,4 @@
+# Optional OCR. The Tesseract executable must also be installed on the server.
+-r requirements.txt
+pdfplumber==0.11.7
+pytesseract==0.3.13

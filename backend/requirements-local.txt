@@ -1,0 +1,5 @@
+# Optional CPU BGE embeddings and cross-encoder reranking.
+-r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1+cpu
+sentence-transformers==3.4.1

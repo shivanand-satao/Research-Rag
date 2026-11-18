@@ -1,0 +1,13 @@
+fastapi==0.141.1
+uvicorn==0.52.4
+httpx==0.28.1
+python-dotenv==1.2.3
+python-multipart==0.0.20
+pydantic==2.12.5
+qdrant-client==1.19.0
+tokenizers==0.22.2
+huggingface-hub==0.36.2
+pypdf==6.1.0
+python-docx==1.1.2
+Pillow==12.3.0
+
