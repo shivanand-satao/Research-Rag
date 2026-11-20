@@ -34,18 +34,18 @@ from fastapi.testclient import TestClient
 from app import main
 from app.config import settings
 main.start_cleanup = lambda: None
-assert settings.frontend_url == 'https://research-rag-seven.vercel.app'
-assert settings.redirect_url == 'https://research-rag-seven.vercel.app/auth/callback'
+assert settings.frontend_url == 'https://research-rag-steel.vercel.app'
+assert settings.redirect_url == 'https://research-rag-steel.vercel.app/auth/callback'
 assert settings.qdrant_all_minilm_l6_v2 and not settings.rerank and not settings.ocr
 with TestClient(main.app) as client:
     assert client.get('/api/health').status_code == 200
     assert client.head('/').status_code == 200
     response = client.options('/api/documents', headers={
-        'Origin': 'https://research-rag-seven.vercel.app',
+        'Origin': 'https://research-rag-steel.vercel.app',
         'Access-Control-Request-Method': 'POST',
         'Access-Control-Request-Headers': 'authorization,content-type'})
     assert response.status_code == 200
-    assert response.headers['access-control-allow-origin'] == 'https://research-rag-seven.vercel.app'
+    assert response.headers['access-control-allow-origin'] == 'https://research-rag-steel.vercel.app'
 assert 'torch' not in sys.modules and 'transformers' not in sys.modules
 print('Cloud startup and production preflight passed without optional dependencies')
 '''

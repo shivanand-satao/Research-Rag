@@ -33,20 +33,21 @@ The checked-in production environment files contain public URLs and feature flag
 | --- | --- | --- |
 | Vercel | Root Directory | `frontend` |
 | Vercel | Build Command / Output | `npm run build` / `dist` |
-| Vercel | `VITE_BACKEND_URL` | `https://research-rag-ugc0.onrender.com` |
+| Vercel | `VITE_BACKEND_URL` | `https://research-rag-xmv4.onrender.com` |
 | Render | Root Directory | `backend` |
 | Render | Build Command | `pip install -r requirements.txt` |
 | Render | Start Command | `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Render | Health Check Path | `/api/health` |
 | Render | `APP_ENV` / `PYTHON_VERSION` | `production` / `3.12.12` |
-| Render | `FRONTEND_URL` | `https://research-rag-seven.vercel.app` |
-| Render | `RESEARCH_REDIRECT_URL` | `https://research-rag-seven.vercel.app/auth/callback` |
+| Render | `FRONTEND_URL` | `https://research-rag-steel.vercel.app` |
+| Render | `RESEARCH_REDIRECT_URL` | `https://research-rag-steel.vercel.app/auth/callback` |
+| Render | `CORS_ORIGINS` | `https://research-rag-steel.vercel.app` |
 | Render | `QDRANT_ALL_MINILM_L6_V2` | `true` |
 | Render | `RESEARCH_RERANK_ENABLED` / `OCR` | `false` / `false` |
 
 `render.yaml` provides the backend deployment configuration. For an existing manually created service, copy the settings above or apply it as a Render Blueprint. Supply `SUPABASE_URL`, `SUPABASE_KEY` (or `SUPABASE_ANON_KEY`), `QDRANT_URL`, `QDRANT_API_KEY`, and `GROQ_API_KEY` in Render. Use a single backend worker because file-job coordination runs inside the process. Clear the Render build cache when switching from the old full dependency set, then redeploy. Redeploy Vercel after changing `VITE_BACKEND_URL`, since Vite embeds it at build time.
 
-In Supabase Authentication URL Configuration, set the production Site URL to `https://research-rag-seven.vercel.app` and allow `https://research-rag-seven.vercel.app/auth/callback` plus the recovery variant ending in `?recovery=1`. Keep localhost entries if local development is still needed.
+In Supabase Authentication URL Configuration, set the production Site URL to `https://research-rag-steel.vercel.app` and allow `https://research-rag-steel.vercel.app/auth/callback` plus the recovery variant ending in `?recovery=1`. Keep localhost entries if local development is still needed.
 
 The frontend calls Render directly for authentication configuration, chat/file actions, and authenticated PDF previews. CORS allows the configured frontend origin. Vercel's configuration serves the SPA; it does not need an `/api` proxy. The backend root and `/api/health` return health JSON, and the root also accepts HEAD probes. A logged `404 GET /` in an older deployment means the root route was absent; it does not establish that the backend failed to start.
 
