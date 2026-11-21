@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import HTTPException
 
-from .config import BACKEND, settings
+from .config import BACKEND
 from .database import Database
 from .processing import extract
-from .vectors import embed, embedding_tokenizer, vector_store
+from .vectors import embedding_tokenizer, vector_store
 
 logger = logging.getLogger(__name__)
 cache = BACKEND / ".cache" / "uploads"
@@ -53,15 +53,11 @@ def failure_message(exc: Exception, phase: str) -> str:
     if code in {401, 403}:
         return "The vector service denied access. Check that QDRANT_API_KEY can write to this cluster, then retry."
     if code == 400:
-        if settings.qdrant_all_minilm_l6_v2:
-            return "Qdrant rejected cloud indexing (HTTP 400). Enable inference on the cluster and check that sentence-transformers/all-minilm-l6-v2 is available, then retry."
-        return "The vector service rejected indexing (HTTP 400). Check the backend log for the field or vector configuration, then retry."
+        return "Qdrant rejected cloud indexing (HTTP 400). Enable inference on the cluster and check that sentence-transformers/all-minilm-l6-v2 is available, then retry."
     if isinstance(source, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.TimeoutException)):
         return "Cannot reach the vector service over HTTPS. Check the backend network connection and cluster availability, then retry."
     if phase == "Preparing tokenizer":
         return "The tokenizer could not be loaded. Check the backend tokenizer cache or Hugging Face connection, then retry."
-    if phase == "Loading embedding model":
-        return "The embedding model could not be loaded. Check the backend model cache or Hugging Face connection, then retry."
     if phase == "Reading document":
         return "The document could not be read. Check that the PDF opens correctly and is not password protected."
     return f"{phase} failed ({type(exc).__name__}). Retry this file; its original is retained."
@@ -88,16 +84,14 @@ def _process(db: Database, document: dict, activity: Activity):
             else:
                 content = db.storage("GET", document["storage_path"]).content
             stored = True
-            _progress(activity, "Preparing tokenizer" if settings.qdrant_all_minilm_l6_v2 else "Loading embedding model", 15)
+            _progress(activity, "Preparing tokenizer", 15)
             tokenizer = embedding_tokenizer()
             _progress(activity, "Reading document", 25)
-            semantic = None if settings.qdrant_all_minilm_l6_v2 else lambda texts: embed(texts, cancelled=activity.cancelled.is_set)
-            chunks = extract(content, document["source"], tokenizer=tokenizer, semantic_embed=semantic,
+            chunks = extract(content, document["source"], tokenizer=tokenizer,
                 progress=lambda done, total: _progress(activity, "Reading document", 25 + int(20 * done / total)))
-            _progress(activity, "Embedding in Qdrant and indexing" if settings.qdrant_all_minilm_l6_v2 else "Embedding and indexing", 45)
+            _progress(activity, "Embedding in Qdrant and indexing", 45)
             vector_store().index(db.user.id, document["id"], document["source"], chunks,
                 cancelled=activity.cancelled.is_set,
-                embedding_progress=lambda done, total: _progress(activity, "Embedding passages", 45 + int(20 * done / total)),
                 progress=lambda done, total: _progress(activity, "Indexing passages", 65 + int(30 * done / total)))
             _progress(activity, "Finishing", 98)
             db.update("documents", document["id"], {"status": "ready", "chunk_count": len(chunks), "error": None})

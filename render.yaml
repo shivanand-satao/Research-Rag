@@ -17,8 +17,6 @@ services:
         value: https://research-rag-steel.vercel.app/auth/callback
       - key: CORS_ORIGINS
         value: https://research-rag-steel.vercel.app
-      - key: QDRANT_ALL_MINILM_L6_V2
-        value: "true"
       - key: RESEARCH_RERANK_ENABLED
         value: "false"
       - key: OCR

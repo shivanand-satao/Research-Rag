@@ -31,12 +31,12 @@ def ocr_image(image) -> str:
         return ""
 
 
-def extract(content: bytes, filename: str, *, tokenizer=None, semantic_embed=None, progress=None) -> list[Chunk]:
+def extract(content: bytes, filename: str, *, tokenizer=None, progress=None) -> list[Chunk]:
     suffix = Path(filename).suffix.lower()
     if suffix not in MIME_TYPES:
         raise ValueError("Upload a PDF, DOCX, TXT, or Markdown file.")
     chunks: list[Chunk] = []
-    chunker = SemanticChunker(tokenizer, semantic_embed, child_tokens=settings.embedding_child_tokens,
+    chunker = SemanticChunker(tokenizer, child_tokens=settings.embedding_child_tokens,
         parent_tokens=settings.parent_tokens)
     if suffix == ".pdf":
         from pypdf import PdfReader

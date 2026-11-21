@@ -4,7 +4,6 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Callable
 
 CHUNKING_VERSION = 2
 
@@ -19,12 +18,10 @@ class Chunk:
 
 
 class SemanticChunker:
-    def __init__(self, tokenizer=None, semantic_embed: Callable | None = None,
-                 child_tokens=360, parent_tokens=1600, minimum_tokens=100):
+    def __init__(self, tokenizer=None, child_tokens=360, parent_tokens=1600, minimum_tokens=100):
         if child_tokens < 16 or parent_tokens < child_tokens:
             raise ValueError("Invalid chunk budgets")
         self.tokenizer = tokenizer
-        self.semantic_embed = semantic_embed
         self.child_tokens = child_tokens
         self.parent_tokens = parent_tokens
         self.minimum_tokens = minimum_tokens
@@ -77,22 +74,15 @@ class SemanticChunker:
             return set()
         # Compare intact paragraphs/sentences so genuine topic transitions stay visible.
         similarities = []
-        if self.semantic_embed:
-            vectors = self.semantic_embed(units)
-            for left, right in zip(vectors, vectors[1:]):
-                divisor = math.sqrt(sum(v*v for v in left) * sum(v*v for v in right))
-                similarities.append(sum(a*b for a, b in zip(left, right)) / max(divisor, 1e-12))
-        else:
-            # Cloud mode keeps adaptive topic boundaries without running a local neural model.
-            # Sparse TF-IDF overlap uses document vocabulary and requires no embedding inference.
-            stopwords = {"the", "a", "an", "and", "or", "of", "in", "to", "for", "is", "are", "with", "was", "were"}
-            counts = [Counter(term for term in re.findall(r"\w+", unit.lower()) if term not in stopwords) for unit in units]
-            frequency = Counter(term for count in counts for term in count)
-            weights = [{term: count * math.log(1 + len(units) / frequency[term]) for term, count in terms.items()} for terms in counts]
-            norms = [math.sqrt(sum(value * value for value in weight.values())) for weight in weights]
-            for index, (left, right) in enumerate(zip(weights, weights[1:])):
-                dot = sum(left[term] * right[term] for term in left.keys() & right.keys())
-                similarities.append(dot / max(norms[index] * norms[index + 1], 1e-12))
+        # Sparse TF-IDF overlap uses document vocabulary and requires no embedding inference.
+        stopwords = {"the", "a", "an", "and", "or", "of", "in", "to", "for", "is", "are", "with", "was", "were"}
+        counts = [Counter(term for term in re.findall(r"\w+", unit.lower()) if term not in stopwords) for unit in units]
+        frequency = Counter(term for count in counts for term in count)
+        weights = [{term: count * math.log(1 + len(units) / frequency[term]) for term, count in terms.items()} for terms in counts]
+        norms = [math.sqrt(sum(value * value for value in weight.values())) for weight in weights]
+        for index, (left, right) in enumerate(zip(weights, weights[1:])):
+            dot = sum(left[term] * right[term] for term in left.keys() & right.keys())
+            similarities.append(dot / max(norms[index] * norms[index + 1], 1e-12))
         ordered = sorted(similarities)
         threshold = min(.78, ordered[max(0, int(len(ordered) * .25) - 1)])
         return {index + 1 for index, score in enumerate(similarities) if score <= threshold}

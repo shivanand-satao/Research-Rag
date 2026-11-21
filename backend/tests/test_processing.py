@@ -40,7 +40,7 @@ def test_semantic_topic_changes_create_variable_sized_children():
     paragraphs = ["Biological findings and cellular respiration. " * 20,
         "Additional biological results and ATP synthesis. " * 15,
         "Financial analysis of bond prices and interest rates. " * 20]
-    chunker = SemanticChunker(semantic_embed=lambda windows: [[1, 0], [1, 0], [0, 1]], minimum_tokens=50)
+    chunker = SemanticChunker(minimum_tokens=50)
     chunks = chunker.chunk("\n\n".join(paragraphs), page=2)
     assert len(chunks) == 2
     assert "Financial" not in chunks[0].text

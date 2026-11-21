@@ -19,7 +19,7 @@ def test_root_and_render_health_probe_are_available():
 
 def test_production_startup_without_local_ml_or_ocr_dependencies():
     env = dict(os.environ)
-    for key in ["FRONTEND_URL", "CORS_ORIGINS", "RESEARCH_REDIRECT_URL", "RESEARCH_RERANK_ENABLED", "OCR", "QDRANT_ALL_MINILM_L6_V2"]:
+    for key in ["FRONTEND_URL", "CORS_ORIGINS", "RESEARCH_REDIRECT_URL", "RESEARCH_RERANK_ENABLED", "OCR"]:
         env.pop(key, None)
     env["APP_ENV"] = "production"
     code = '''
@@ -36,7 +36,8 @@ from app.config import settings
 main.start_cleanup = lambda: None
 assert settings.frontend_url == 'https://research-rag-steel.vercel.app'
 assert settings.redirect_url == 'https://research-rag-steel.vercel.app/auth/callback'
-assert settings.qdrant_all_minilm_l6_v2 and not settings.rerank and not settings.ocr
+assert settings.embedding_model == 'sentence-transformers/all-minilm-l6-v2'
+assert not settings.rerank and not settings.ocr
 with TestClient(main.app) as client:
     assert client.get('/api/health').status_code == 200
     assert client.head('/').status_code == 200

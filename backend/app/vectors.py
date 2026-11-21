@@ -1,4 +1,4 @@
-"""Switchable Qdrant Cloud / local embeddings and tenant-filtered retrieval."""
+"""Qdrant Cloud embeddings and tenant-filtered retrieval."""
 import math
 import hashlib
 import json
@@ -7,7 +7,6 @@ import threading
 import time
 from collections import Counter
 from functools import lru_cache
-from contextlib import contextmanager
 from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
@@ -16,47 +15,6 @@ from qdrant_client import QdrantClient, models
 from .config import BACKEND, settings
 from .processing import Chunk
 from .chunking import CHUNKING_VERSION
-
-model_lock = threading.Lock()
-_embedding_condition = threading.Condition()
-_embedding_active = False
-_waiting_queries = 0
-_model = None
-
-
-@contextmanager
-def embedding_slot(priority=False):
-    global _embedding_active, _waiting_queries
-    with _embedding_condition:
-        if priority:
-            _waiting_queries += 1
-        try:
-            _embedding_condition.wait_for(lambda: not _embedding_active and (priority or _waiting_queries == 0))
-            _embedding_active = True
-        finally:
-            if priority:
-                _waiting_queries -= 1
-    try:
-        yield
-    finally:
-        with _embedding_condition:
-            _embedding_active = False
-            _embedding_condition.notify_all()
-
-
-def embedder():
-    global _model
-    if settings.qdrant_all_minilm_l6_v2:
-        raise RuntimeError("Local embeddings are disabled while QDRANT_ALL_MINILM_L6_V2=true.")
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise ValueError("Local BGE requires requirements-local.txt. Install it or enable QDRANT_ALL_MINILM_L6_V2 for cloud embeddings.") from exc
-    with model_lock:
-        if _model is None:
-            kwargs = {} if settings.embedding_device == "auto" else {"device": settings.embedding_device}
-            _model = SentenceTransformer(settings.embedding_model, **kwargs)
-    return _model
 
 
 @lru_cache(maxsize=1)
@@ -84,25 +42,7 @@ class _CloudTokenizer:
 
 
 def embedding_tokenizer():
-    return _minilm_tokenizer() if settings.qdrant_all_minilm_l6_v2 else embedder().tokenizer
-
-
-def embed(texts: list[str], *, query=False, cancelled=None, progress=None) -> list[list[float]]:
-    if settings.qdrant_all_minilm_l6_v2:
-        raise RuntimeError("Send Document text to Qdrant for cloud embeddings instead of calling embed().")
-    model = embedder()
-    if query and "bge" in settings.embedding_model.lower():
-        texts = ["Represent this sentence for searching relevant passages: " + text for text in texts]
-    output = []
-    for start in range(0, len(texts), settings.embedding_batch_size):
-        if cancelled and cancelled():
-            raise InterruptedError("File processing cancelled")
-        with embedding_slot(priority=query):
-            output.extend(model.encode(texts[start:start + settings.embedding_batch_size], normalize_embeddings=True,
-                batch_size=settings.embedding_batch_size, show_progress_bar=False).tolist())
-        if progress:
-            progress(min(start + settings.embedding_batch_size, len(texts)), len(texts))
-    return output
+    return _minilm_tokenizer()
 
 
 def scoped_filter(user_id: str, document_ids: list[str]) -> models.Filter:
@@ -145,15 +85,13 @@ def fuse(rankings: list[list[dict]], limit: int) -> list[dict]:
 
 class VectorStore:
     def __init__(self, client=None):
-        if settings.qdrant_all_minilm_l6_v2 and not settings.qdrant_url:
-            raise ValueError("QDRANT_ALL_MINILM_L6_V2=true requires QDRANT_URL for a Qdrant Cloud cluster with inference enabled.")
+        if client is None and not settings.qdrant_url:
+            raise ValueError("Qdrant Cloud embeddings require QDRANT_URL for a cluster with inference enabled.")
         url = urlparse(settings.qdrant_url)
         port = url.port or (443 if url.scheme == "https" else 6333)
-        self.client = client or (QdrantClient(url=settings.qdrant_url, port=port, api_key=settings.qdrant_key,
-            cloud_inference=settings.qdrant_all_minilm_l6_v2, timeout=30)
-            if settings.qdrant_url else QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port, timeout=15))
+        self.client = client or QdrantClient(url=settings.qdrant_url, port=port, api_key=settings.qdrant_key,
+            cloud_inference=True, timeout=30)
         self.collection = settings.collection
-        self.cloud_inference = settings.qdrant_all_minilm_l6_v2
         self.embedding_model = settings.embedding_model
         self.lock = threading.Lock()
         self.verified: dict[tuple[str, str], float] = {}
@@ -176,18 +114,12 @@ class VectorStore:
             if field not in schema:
                 self.client.create_payload_index(self.collection, field, kind, wait=True)
 
-    def index(self, user_id: str, document_id: str, filename: str, chunks: list[Chunk], *, cancelled=None, progress=None, embedding_progress=None):
+    def index(self, user_id: str, document_id: str, filename: str, chunks: list[Chunk], *, cancelled=None, progress=None):
         if not chunks:
             raise ValueError("Cannot index an empty document")
         if cancelled and cancelled():
             raise InterruptedError("File processing cancelled")
-        if self.cloud_inference:
-            vectors = None
-            self.ensure(384)
-        else:
-            kwargs = {**({"cancelled": cancelled} if cancelled else {}), **({"progress": embedding_progress} if embedding_progress else {})}
-            vectors = embed([chunk.text for chunk in chunks], **kwargs)
-            self.ensure(len(vectors[0]))
+        self.ensure(384)
         revision = hashlib.sha256(json.dumps({"version": CHUNKING_VERSION, "model": self.embedding_model,
             "chunks": [(c.text, c.parent_text, c.page, c.section) for c in chunks]}, ensure_ascii=False).encode()).hexdigest()
         for start in range(0, len(chunks), 64):
@@ -195,7 +127,7 @@ class VectorStore:
                 raise InterruptedError("File processing cancelled")
             points = [models.PointStruct(
                 id=str(uuid5(NAMESPACE_URL, f"{user_id}/{document_id}/{revision}/{index}")),
-                vector=models.Document(text=chunk.text, model=self.embedding_model) if self.cloud_inference else vectors[index],
+                vector=models.Document(text=chunk.text, model=self.embedding_model),
                 payload={"user_id": user_id, "document_id": document_id, "source": filename,
                     "text": chunk.text, "page": chunk.page, "section": chunk.section, "chunk_index": index,
                     "parent_text": chunk.parent_text or chunk.text, "parent_id": chunk.parent_id or str(index),
@@ -248,22 +180,19 @@ class VectorStore:
 
     def search(self, query: str, user_id: str, document_ids: list[str], mode: str, limit: int) -> list[dict]:
         security_filter = scoped_filter(user_id, document_ids)
-        # Both models have 384 dimensions, but their vector spaces are incompatible.
+        # Exclude incompatible vectors left by older embedding models.
         security_filter.must.append(models.FieldCondition(key="embedding_model", match=models.MatchValue(value=self.embedding_model)))
         if not self.client.collection_exists(self.collection):
             return []
         dense, lexical = [], []
         if mode in {"vector", "hybrid"}:
-            if self.cloud_inference:
-                tokenizer = embedding_tokenizer()
-                tokens = tokenizer.encode(query, add_special_tokens=False)
-                if len(tokens) > 254:
-                    query_text = tokenizer.decode(tokens[:254], skip_special_tokens=True)
-                else:
-                    query_text = query
-                vector = models.Document(text=query_text, model=self.embedding_model)
+            tokenizer = embedding_tokenizer()
+            tokens = tokenizer.encode(query, add_special_tokens=False)
+            if len(tokens) > 254:
+                query_text = tokenizer.decode(tokens[:254], skip_special_tokens=True)
             else:
-                vector = embed([query], query=True)[0]
+                query_text = query
+            vector = models.Document(text=query_text, model=self.embedding_model)
             result = self.client.query_points(self.collection, query=vector, query_filter=security_filter,
                 limit=limit, with_payload=True, search_params=models.SearchParams(hnsw_ef=128))
             dense = [{**hit.payload, "id": str(hit.id), "score": hit.score} for hit in result.points]

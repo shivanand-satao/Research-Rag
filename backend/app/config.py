@@ -10,7 +10,6 @@ PRODUCTION = os.getenv("APP_ENV", "").strip().lower() == "production" or os.gete
 load_dotenv(BACKEND / (".env.production" if PRODUCTION else ".env"))
 
 QDRANT_MINILM_MODEL = "sentence-transformers/all-minilm-l6-v2"
-LOCAL_BGE_MODEL = "BAAI/bge-small-en-v1.5"
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://127.0.0.1:5173").rstrip("/")
 
 
@@ -23,12 +22,7 @@ class Settings:
     storage_bucket: str = os.getenv("RESEARCH_STORAGE_BUCKET", "research-documents")
     qdrant_url: str = os.getenv("QDRANT_URL") or os.getenv("QDRANT_CLUSTER_ENDPOINT", "")
     qdrant_key: str = os.getenv("QDRANT_API_KEY", "")
-    qdrant_host: str = os.getenv("QDRANT_HOST", "localhost")
-    qdrant_port: int = int(os.getenv("QDRANT_PORT", "6333"))
     collection: str = os.getenv("RESEARCH_QDRANT_COLLECTION", "research_rag_chunks")
-    qdrant_all_minilm_l6_v2: bool = os.getenv("QDRANT_ALL_MINILM_L6_V2", "false").strip().lower() == "true"
-    embedding_device: str = os.getenv("EMBEDDING_DEVICE", "cpu")
-    embedding_batch_size: int = max(1, int(os.getenv("EMBEDDING_BATCH_SIZE", "8")))
     groq_key: str = os.getenv("GROQ_API_KEY", "")
     groq_url: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
     generation_model: str = os.getenv("GENERATION_MODEL", "openai/gpt-oss-120b")
@@ -51,12 +45,12 @@ class Settings:
 
     @property
     def embedding_model(self) -> str:
-        return QDRANT_MINILM_MODEL if self.qdrant_all_minilm_l6_v2 else LOCAL_BGE_MODEL
+        return QDRANT_MINILM_MODEL
 
     @property
     def embedding_child_tokens(self) -> int:
         # Hosted MiniLM accepts 256 tokens, including [CLS] and [SEP].
-        return min(self.child_tokens, 254) if self.qdrant_all_minilm_l6_v2 else self.child_tokens
+        return min(self.child_tokens, 254)
 
 
 settings = Settings()

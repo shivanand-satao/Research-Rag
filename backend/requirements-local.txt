@@ -1,4 +1,4 @@
-# Optional CPU BGE embeddings and cross-encoder reranking.
+# Optional CPU cross-encoder reranking.
 -r requirements.txt
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.7.1+cpu

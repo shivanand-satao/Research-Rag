@@ -70,7 +70,6 @@ class FakeDatabase:
 
 @pytest.fixture
 def file_jobs(monkeypatch, tmp_path):
-    monkeypatch.setattr(jobs, "settings", replace(jobs.settings, qdrant_all_minilm_l6_v2=False))
     indexing, deleting = QueuedExecutor(), QueuedExecutor()
     monkeypatch.setattr(jobs, "pool", indexing)
     monkeypatch.setattr(jobs, "delete_pool", deleting)
@@ -192,20 +191,24 @@ def test_index_failure_retains_original_and_retry_uses_it(file_jobs, monkeypatch
     assert db.storage_calls[-1][0] == "GET"
 
 
-def test_cloud_file_job_skips_local_model_for_chunking(file_jobs, monkeypatch):
+def test_cloud_file_job_uses_tokenizer_and_reports_hosted_indexing(file_jobs, monkeypatch):
     db, document, indexing, _ = file_jobs
-    calls = []
-    monkeypatch.setattr(jobs, "settings", replace(jobs.settings, qdrant_all_minilm_l6_v2=True))
-    monkeypatch.setattr(jobs, "embed", lambda *args, **kwargs: pytest.fail("Cloud ingestion loaded local embeddings"))
+    calls, phases = [], []
+    tokenizer = object()
+    monkeypatch.setattr(jobs, "embedding_tokenizer", lambda: tokenizer)
     def extract(*args, **kwargs):
-        assert kwargs["semantic_embed"] is None
+        assert kwargs["tokenizer"] is tokenizer
         return [Chunk("Cloud evidence")]
+    def index(*args, **kwargs):
+        calls.append(args)
+        phases.append(jobs.activities[(db.user.id, document["id"])].phase)
     monkeypatch.setattr(jobs, "extract", extract)
-    monkeypatch.setattr(jobs, "vector_store", lambda: SimpleNamespace(index=lambda *args, **kwargs: calls.append(args)))
+    monkeypatch.setattr(jobs, "vector_store", lambda: SimpleNamespace(index=index))
     jobs.schedule_index(db, document, b"original")
     indexing.run()
     assert db.get("documents", document["id"])["status"] == "ready"
     assert calls[0][3][0].text == "Cloud evidence"
+    assert phases == ["Embedding in Qdrant and indexing"]
 
 
 def test_cancelling_active_index_cannot_resurrect_removed_document(file_jobs, monkeypatch):
@@ -296,19 +299,3 @@ def test_opening_original_during_upload_gives_a_retryable_message():
     with pytest.raises(HTTPException) as error:
         routes.original_file(UploadingDatabase(), {"storage_path": "alice/source.pdf", "status": "processing"})
     assert error.value.status_code == 409 and "still uploading" in error.value.detail
-
-
-def test_embedding_batches_release_access_and_observe_cancellation(monkeypatch):
-    batches, progress = [], []
-    class Model:
-        def encode(self, texts, **kwargs):
-            batches.append(texts)
-            return SimpleNamespace(tolist=lambda: [[1.0, 0.0] for text in texts])
-    monkeypatch.setattr(vectors, "embedder", lambda: Model())
-    monkeypatch.setattr(vectors, "settings", replace(vectors.settings, embedding_batch_size=2, qdrant_all_minilm_l6_v2=False))
-    result = vectors.embed(["a", "b", "c"], progress=lambda done, total: progress.append((done, total)))
-    assert len(result) == 3 and batches == [["a", "b"], ["c"]] and progress == [(2, 3), (3, 3)]
-    assert not vectors._embedding_active
-    with pytest.raises(InterruptedError):
-        vectors.embed(["a", "b", "c"], cancelled=lambda: len(batches) >= 3)
-    assert batches[-1] == ["a", "b"] and not vectors._embedding_active

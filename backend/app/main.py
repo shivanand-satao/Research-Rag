@@ -33,6 +33,6 @@ app.include_router(router)
 def health():
     return {"status": "ok", "app": "Research RAG", "supabase_configured": bool(settings.supabase_url and settings.supabase_key),
         "generation_configured": bool(settings.groq_key),
-        "embedding_provider": "qdrant-cloud" if settings.qdrant_all_minilm_l6_v2 else "local-bge",
+        "embedding_provider": "qdrant-cloud",
         "rerank_enabled": settings.rerank}
 

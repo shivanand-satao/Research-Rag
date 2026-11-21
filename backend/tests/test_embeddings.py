@@ -1,6 +1,5 @@
-"""Provider switching, hosted inference requests, and model-safe retrieval."""
+"""Hosted inference requests, token limits, and model-safe retrieval."""
 import json
-from contextlib import closing
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -10,7 +9,7 @@ from qdrant_client import QdrantClient, models
 
 from app import processing, rag, vectors
 from app.chunking import SemanticChunker
-from app.config import LOCAL_BGE_MODEL, QDRANT_MINILM_MODEL
+from app.config import QDRANT_MINILM_MODEL
 from app.processing import Chunk
 from app.schemas import ChatRequest
 
@@ -25,43 +24,31 @@ class Tokenizer:
 
 @pytest.fixture
 def cloud_mode(monkeypatch):
-    settings = replace(vectors.settings, qdrant_all_minilm_l6_v2=True, qdrant_url="https://cluster.example")
+    settings = replace(vectors.settings, qdrant_url="https://cluster.example")
     monkeypatch.setattr(vectors, "settings", settings)
     monkeypatch.setattr(vectors, "_minilm_tokenizer", lambda: Tokenizer())
-    monkeypatch.setattr(vectors, "embed", lambda *args, **kwargs: pytest.fail("Cloud mode invoked local embedding"))
     return settings
 
 
-@pytest.mark.parametrize("enabled,model,ceiling", [(True, QDRANT_MINILM_MODEL, 254), (False, LOCAL_BGE_MODEL, 360)])
-def test_switch_selects_the_model_and_its_token_budget(enabled, model, ceiling):
-    settings = replace(vectors.settings, qdrant_all_minilm_l6_v2=enabled, child_tokens=360)
-    assert settings.embedding_model == model and settings.embedding_child_tokens == ceiling
+@pytest.mark.parametrize("child_tokens,ceiling", [(360, 254), (128, 128)])
+def test_minilm_token_budget_caps_large_chunks_and_preserves_smaller_limits(child_tokens, ceiling):
+    settings = replace(vectors.settings, child_tokens=child_tokens)
+    assert settings.embedding_model == QDRANT_MINILM_MODEL and settings.embedding_child_tokens == ceiling
 
 
-@pytest.mark.parametrize("enabled", [True, False])
-def test_sdk_cloud_inference_matches_switch(monkeypatch, enabled):
+def test_sdk_always_uses_cloud_inference(monkeypatch):
     calls = []
     monkeypatch.setattr(vectors, "settings", replace(vectors.settings,
-        qdrant_all_minilm_l6_v2=enabled, qdrant_url="https://cluster.example"))
+        qdrant_url="https://cluster.example"))
     monkeypatch.setattr(vectors, "QdrantClient", lambda **kwargs: calls.append(kwargs) or object())
     vectors.VectorStore()
-    assert calls[0]["cloud_inference"] is enabled and calls[0]["port"] == 443
+    assert calls[0]["cloud_inference"] is True and calls[0]["port"] == 443
 
 
 def test_cloud_mode_requires_a_cloud_url(monkeypatch):
-    monkeypatch.setattr(vectors, "settings", replace(vectors.settings, qdrant_all_minilm_l6_v2=True, qdrant_url=""))
-    with pytest.raises(ValueError, match="requires QDRANT_URL"):
+    monkeypatch.setattr(vectors, "settings", replace(vectors.settings, qdrant_url=""))
+    with pytest.raises(ValueError, match="require QDRANT_URL"):
         vectors.VectorStore()
-
-
-def test_cloud_mode_guards_all_local_model_entry_points(monkeypatch):
-    monkeypatch.setattr(vectors, "settings", replace(vectors.settings, qdrant_all_minilm_l6_v2=True))
-    monkeypatch.setattr(vectors, "_minilm_tokenizer", lambda: Tokenizer())
-    assert isinstance(vectors.embedding_tokenizer(), Tokenizer)
-    with pytest.raises(RuntimeError, match="Local embeddings are disabled"):
-        vectors.embedder()
-    with pytest.raises(RuntimeError, match="Send Document text to Qdrant"):
-        vectors.embed(["Evidence"])
 
 
 @pytest.fixture
@@ -124,22 +111,17 @@ def test_cloud_query_respects_256_token_model_window(cloud_wire):
     assert query["query"]["nearest"]["model"] == QDRANT_MINILM_MODEL
 
 
-def test_switching_models_requires_reindex_even_with_identical_dimensions(monkeypatch):
-    monkeypatch.setattr(vectors, "settings", replace(vectors.settings, qdrant_all_minilm_l6_v2=False))
-    monkeypatch.setattr(vectors, "embed", lambda texts, **kwargs: [[1.0] + [0.0] * 383 for text in texts])
-    with closing(QdrantClient(":memory:")) as client:
-        bge = vectors.VectorStore(client=client)
-        bge.index("alice", "doc", "report.txt", [Chunk("detector sensitivity evidence")])
-        monkeypatch.setattr(vectors, "settings", replace(vectors.settings, qdrant_all_minilm_l6_v2=True, qdrant_url="https://cluster.example"))
-        minilm = vectors.VectorStore(client=client)
-        assert minilm.needs_reindex("alice", "doc")
-        assert minilm.search("detector", "alice", ["doc"], "text", 8) == []
-        points, _ = client.scroll(bge.collection, limit=1)
-        client.set_payload(bge.collection, {"embedding_model": QDRANT_MINILM_MODEL, "index_revision": "cloud"}, points=[points[0].id])
-        assert not minilm.needs_reindex("alice", "doc")
-        assert minilm.search("detector", "alice", ["doc"], "text", 8)[0]["embedding_model"] == QDRANT_MINILM_MODEL
-        monkeypatch.setattr(vectors, "settings", replace(vectors.settings, qdrant_all_minilm_l6_v2=False))
-        assert vectors.VectorStore(client=client).needs_reindex("alice", "doc")
+def test_legacy_models_require_reindex_even_with_identical_dimensions(qdrant_memory):
+    store = vectors.VectorStore(client=qdrant_memory)
+    store.index("alice", "doc", "report.txt", [Chunk("detector sensitivity evidence")])
+    points, _ = qdrant_memory.scroll(store.collection, limit=1)
+    qdrant_memory.set_payload(store.collection, {"embedding_model": "legacy-embedding-model"}, points=[points[0].id])
+    current = vectors.VectorStore(client=qdrant_memory)
+    assert current.needs_reindex("alice", "doc")
+    assert current.search("detector", "alice", ["doc"], "text", 8) == []
+    qdrant_memory.set_payload(store.collection, {"embedding_model": QDRANT_MINILM_MODEL}, points=[points[0].id])
+    assert not current.needs_reindex("alice", "doc")
+    assert current.search("detector", "alice", ["doc"], "text", 8)[0]["embedding_model"] == QDRANT_MINILM_MODEL
 
 
 def test_cloud_chunks_respect_minilm_context_without_local_embeddings(cloud_mode, monkeypatch):
@@ -162,8 +144,7 @@ def test_cloud_chunking_detects_vocabulary_changes_without_a_model():
     assert len(chunks[0].text) != len(chunks[1].text)
 
 
-def test_cloud_answer_context_never_loads_bge(cloud_mode, monkeypatch):
-    monkeypatch.setattr(vectors, "embedder", lambda: pytest.fail("Context sizing loaded BGE"))
+def test_cloud_answer_context_uses_minilm_tokenizer(cloud_mode, monkeypatch):
     monkeypatch.setattr(rag, "settings", replace(rag.settings, rerank=False))
     child = {"id": "hit", "document_id": "doc", "source": "report.pdf", "page": 2,
         "text": "Sensitivity reached 27 millivolts.", "parent_text": "A calibrated detector. Sensitivity reached 27 millivolts."}
@@ -171,15 +152,3 @@ def test_cloud_answer_context_never_loads_bge(cloud_mode, monkeypatch):
     monkeypatch.setattr(rag, "complete", lambda *args, **kwargs: "Sensitivity reached 27 millivolts [1].")
     request = ChatRequest(request_id="12345678-1234-1234-1234-123456789012", content="What sensitivity was measured?")
     assert rag.answer_question(request, "alice", ["doc"], [])["grounded"]
-
-
-def test_false_switch_uses_bge_query_embedding_instruction(monkeypatch):
-    calls = []
-    class Model:
-        def encode(self, texts, **kwargs):
-            calls.extend(texts)
-            return SimpleNamespace(tolist=lambda: [[1.0, 0.0] for text in texts])
-    monkeypatch.setattr(vectors, "settings", replace(vectors.settings, qdrant_all_minilm_l6_v2=False))
-    monkeypatch.setattr(vectors, "embedder", lambda: Model())
-    assert vectors.embed(["detector sensitivity"], query=True) == [[1.0, 0.0]]
-    assert calls == ["Represent this sentence for searching relevant passages: detector sensitivity"]
