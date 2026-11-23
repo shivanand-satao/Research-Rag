@@ -35,10 +35,10 @@ class Settings:
     ocr: bool = os.getenv("OCR", "false").lower() == "true"
     ocr_language: str = os.getenv("OCR_LANGUAGE", "eng")
     tesseract_cmd: str = os.getenv("TESSERACT_CMD", "")
-    rerank: bool = os.getenv("RESEARCH_RERANK_ENABLED", "true").lower() == "true"
-    rerank_model: str = os.getenv("RESEARCH_RERANK_MODEL", RERANK_MODEL)
-    rerank_revision: str = os.getenv("RESEARCH_RERANK_REVISION", RERANK_REVISION)
-    rerank_onnx_file: str = os.getenv("RESEARCH_RERANK_ONNX_FILE", "onnx/model_quint8_avx2.onnx")
+    rerank: bool = os.getenv("RESEARCH_RERANK_ENABLED", "true").strip().lower() == "true"
+    rerank_model: str = os.getenv("RESEARCH_RERANK_MODEL", RERANK_MODEL).strip() or RERANK_MODEL
+    rerank_revision: str = os.getenv("RESEARCH_RERANK_REVISION", RERANK_REVISION).strip() or RERANK_REVISION
+    rerank_onnx_file: str = os.getenv("RESEARCH_RERANK_ONNX_FILE", "onnx/model_quint8_avx2.onnx").strip() or "onnx/model_quint8_avx2.onnx"
     rerank_batch_size: int = max(1, min(8, int(os.getenv("RESEARCH_RERANK_BATCH_SIZE", "4"))))
     child_tokens: int = int(os.getenv("RESEARCH_CHILD_TOKENS", "360"))
     parent_tokens: int = int(os.getenv("RESEARCH_PARENT_TOKENS", "1600"))

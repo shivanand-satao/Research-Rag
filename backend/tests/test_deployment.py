@@ -18,6 +18,29 @@ def test_root_and_render_health_probe_are_available():
     assert client.get("/api/health").json()["status"] == "ok"
 
 
+def test_reranker_download_receives_clean_dashboard_values():
+    env = dict(os.environ)
+    env.update({
+        "APP_ENV": "production",
+        "RESEARCH_RERANK_ENABLED": " true\r\n",
+        "RESEARCH_RERANK_MODEL": " cross-encoder/ms-marco-MiniLM-L-2-v2\n",
+        "RESEARCH_RERANK_REVISION": "\t1b5cd67b15209f24824c50370e0397743aa9b787\r\n",
+        "RESEARCH_RERANK_ONNX_FILE": " onnx/model_quint8_avx2.onnx\n",
+    })
+    code = '''
+from app.config import settings, RERANK_MODEL, RERANK_REVISION
+from app import onnx_reranker
+received = []
+onnx_reranker.OnnxReranker = lambda model, revision, filename, cache: received.append((model, revision, filename))
+onnx_reranker.load_reranker()
+assert settings.rerank
+assert received == [(RERANK_MODEL, RERANK_REVISION, 'onnx/model_quint8_avx2.onnx')]
+'''
+    result = subprocess.run([sys.executable, "-B", "-c", code], env=env,
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_production_startup_without_local_ml_or_ocr_dependencies(enabled):
     env = dict(os.environ)
