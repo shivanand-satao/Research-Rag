@@ -37,7 +37,6 @@ class Settings:
     rerank_model: str = os.getenv("RESEARCH_RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     child_tokens: int = int(os.getenv("RESEARCH_CHILD_TOKENS", "360"))
     parent_tokens: int = int(os.getenv("RESEARCH_PARENT_TOKENS", "1600"))
-    retrieval_candidates: int = int(os.getenv("RESEARCH_RETRIEVAL_CANDIDATES", "40"))
     context_tokens: int = int(os.getenv("RESEARCH_CONTEXT_TOKENS", "12000"))
     origins: tuple[str, ...] = tuple(dict.fromkeys([FRONTEND_URL, "http://127.0.0.1:5173", "http://localhost:5173",
         *(x.strip().rstrip("/") for x in os.getenv("CORS_ORIGINS", "").split(",") if x.strip())]))

@@ -86,8 +86,9 @@ def test_cloud_upsert_and_query_send_document_text_to_qdrant(cloud_wire):
     assert point["vector"] == {"text": "The detector reached 27 millivolts.", "model": QDRANT_MINILM_MODEL}
     assert point["payload"]["embedding_model"] == QDRANT_MINILM_MODEL
     assert point["payload"]["page"] == 4
-    assert store.search("What was the sensitivity?", "alice", ["doc"], "vector", 8)[0]["text"] == "Evidence"
+    assert store.search("What was the sensitivity?", "alice", ["doc"], "vector", 40)[0]["text"] == "Evidence"
     query = next(body for method, path, body in requests if path.endswith("/query"))
+    assert query["limit"] == 40
     assert query["query"]["nearest"] == {"text": "What was the sensitivity?", "model": QDRANT_MINILM_MODEL}
     assert {condition["key"] for condition in query["filter"]["must"]} == {"user_id", "document_id", "embedding_model"}
 

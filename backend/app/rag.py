@@ -16,6 +16,8 @@ _rerank_model = None
 _rerank_started = False
 _rerank_lock = threading.Lock()
 
+RETRIEVAL_CANDIDATES = 40
+
 INSUFFICIENT = "I couldn't find enough evidence in the selected documents to answer this question. Try selecting more sources or asking a more specific question."
 
 ANSWER_SYSTEM = (
@@ -198,12 +200,10 @@ def answer_question(request: ChatRequest, user_id: str, document_ids: list[str],
     queries = list(dict.fromkeys([question, search_query]))
     rankings = []
     for query in queries:
-        if across:
-            ranking = [chunk for doc_id in document_ids for chunk in store.search(query, user_id, [doc_id], request.mode, 8)]
-        else:
-            ranking = store.search(query, user_id, document_ids, request.mode, max(request.top_k * 4, settings.retrieval_candidates))
+        # Search a fixed pool; top_k only controls the final context selection.
+        ranking = store.search(query, user_id, document_ids, request.mode, RETRIEVAL_CANDIDATES)
         rankings.append(ranking)
-    chunks = fuse(rankings, max(settings.retrieval_candidates, len(document_ids) * 8)) if len(rankings) > 1 else rankings[0]
+    chunks = fuse(rankings, RETRIEVAL_CANDIDATES) if len(rankings) > 1 else rankings[0]
     if settings.rerank and chunks:
         try:
             model = reranker()

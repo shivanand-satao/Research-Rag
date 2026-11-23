@@ -1,5 +1,6 @@
 from dataclasses import replace
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -33,18 +34,52 @@ def retrieval(monkeypatch):
     return child, queries
 
 
-def test_answer_uses_parent_context_and_larger_candidate_pool(retrieval, monkeypatch):
+@pytest.mark.parametrize("top_k", [8, 16])
+@pytest.mark.parametrize("scope", ["auto", "focused", "all_documents"])
+def test_answer_uses_parent_context_and_fixed_candidate_pool(retrieval, monkeypatch, top_k, scope):
     _, queries = retrieval
     prompts = []
     def completion(messages, **kwargs):
         prompts.append(messages)
         return "Sensitivity improved from 18 to 27 millivolts per unit [1]."
     monkeypatch.setattr(rag, "complete", completion)
-    result = rag.answer_question(ChatRequest(request_id="12345678-1234-1234-1234-123456789012", content="What was the improved sensitivity?"), "alice", ["doc"], [])
+    result = rag.answer_question(ChatRequest(request_id="12345678-1234-1234-1234-123456789012", content="What was the improved sensitivity?", top_k=top_k, scope=scope), "alice", ["doc", "other"], [])
     assert result["grounded"]
     assert "baseline was 18" in prompts[0][-1]["content"]
-    assert queries[0][3] >= 40
+    assert len(queries) == 1
+    assert queries[0][2:] == (["doc", "other"], 40)
     assert result["citations"][0]["page"] == 4
+
+
+@pytest.mark.parametrize("followup", [False, True])
+def test_reranker_receives_40_candidates_before_selecting_8_contexts(retrieval, monkeypatch, followup):
+    child, queries = retrieval
+    documents = ["doc", *[f"doc-{index}" for index in range(1, 6)]]
+    prompts, reranked = [], []
+    class Store:
+        def search(self, query, user, selected, mode, limit):
+            queries.append((query, user, selected, limit))
+            return [{**child, "id": f"{len(queries)}-{index}", "parent_id": f"{len(queries)}-{index}",
+                "document_id": documents[index % len(documents)],
+                "text": f"Sensitivity measurement {len(queries)}-{index}.",
+                "parent_text": f"Sensitivity measurement {len(queries)}-{index}."} for index in range(40)]
+    def predict(pairs, **kwargs):
+        reranked.extend(text for _, text in pairs)
+        # Make the last candidate most relevant to exercise selection after reranking.
+        return list(range(len(pairs)))
+    monkeypatch.setattr(rag, "vector_store", lambda: Store())
+    monkeypatch.setattr(rag, "settings", replace(rag.settings, rerank=True))
+    monkeypatch.setattr(rag, "reranker", lambda: SimpleNamespace(predict=predict))
+    monkeypatch.setattr(rag, "complete", lambda messages, **kwargs: prompts.append(messages) or "The sensitivity was measured [1].")
+    history = [{"role": "user", "content": "Tell me about the detector"}] if followup else []
+    request = ChatRequest(request_id="12345678-1234-1234-1234-123456789012", content="What was its sensitivity?", scope="focused")
+    result = rag.answer_question(request, "alice", documents, history)
+    assert result["grounded"]
+    assert len(queries) == (2 if followup else 1)
+    assert all(selected == documents and limit == 40 for _, _, selected, limit in queries)
+    assert len(reranked) == 40
+    context = json.loads(prompts[0][-1]["content"])["source_excerpts"]
+    assert [excerpt["text"] for excerpt in context] == list(reversed(reranked[-8:]))
 
 
 def test_missing_citation_is_repaired_instead_of_claiming_no_evidence(retrieval, monkeypatch):
