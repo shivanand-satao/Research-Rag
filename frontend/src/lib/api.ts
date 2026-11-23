@@ -4,7 +4,7 @@ import { apiUrl, responseError } from './endpoints';
 export interface DocumentSource { id: string; title: string; source: string; status: 'ready' | 'processing' | 'failed' | 'deleting'; chunk_count: number; size_bytes: number; created_at: string; error: string | null; activity?: { phase: string; progress: number } }
 export type FileAction = 'uploading' | 'retrying' | 'deleting';
 export interface Conversation { id: string; title: string; document_ids: string[]; updated_at: string; created_at: string }
-export interface Citation { number: number; document_id: string; source: string; page: number | null; section: string | null; excerpt: string }
+interface Citation { number: number; document_id: string; source: string; page: number | null; section: string | null; excerpt: string }
 export interface Message { id: string; role: 'user' | 'assistant'; content: string; created_at: string; request_id?: string; metadata: { citations?: Citation[]; grounded?: boolean; model?: string } }
 export interface Turn { conversation: Conversation; messages: Message[] }
 

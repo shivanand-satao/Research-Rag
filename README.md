@@ -1,6 +1,6 @@
 # Research RAG
 
-A private research workspace with a neutral black interface, Supabase authentication, document-grounded chat, and persistent conversation history. The reference project is read-only; this application lives in the root `backend`, `frontend`, and `supabase` folders.
+A private research workspace with a neutral black interface, Supabase authentication, document-grounded chat, and persistent conversation history. The application lives in the `backend`, `frontend`, and `supabase` folders.
 
 ## Run locally
 
@@ -24,7 +24,7 @@ Open `http://127.0.0.1:5173`. On macOS/Linux, use `.venv/bin/python` and `npm` i
 
 `backend/requirements.txt` installs the base cloud runtime: the API, Qdrant client, MiniLM tokenizer, native PDF/Word extraction, and PDF preview support. `requirements-rerank.txt` includes that runtime plus CPU ONNX Runtime for the enabled L-2 cross-encoder. Neither installs Torch, transformers, sentence-transformers, OCR packages, or pytest. Pillow remains required for text/Word PDF previews. Embeddings run in Qdrant Cloud; the separate local reranker uses a quantized ONNX model of about 16 MB.
 
-`requirements-local.txt` is a compatibility alias for `requirements-rerank.txt`. `requirements-ocr.txt` adds OCR (also needs the Tesseract executable), and `requirements-dev.txt` adds tests. Reranking is enabled in local defaults and the production profile; OCR remains disabled. To run only the base runtime, set `RESEARCH_RERANK_ENABLED=false` and install `requirements.txt`.
+`requirements-ocr.txt` adds OCR (also needs the Tesseract executable), and `requirements-dev.txt` adds tests. Reranking is enabled in local defaults and the production profile; OCR remains disabled. To run only the base runtime, set `RESEARCH_RERANK_ENABLED=false` and install `requirements.txt`.
 
 ## Vercel and Render
 

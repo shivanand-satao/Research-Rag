@@ -74,7 +74,7 @@ def upload(file: UploadFile = File(...), user: Identity = Depends(authenticate))
         "mime_type": MIME_TYPES[suffix], "status": "processing", "storage_path": path, "size_bytes": len(content)})
     try:
         return schedule_index(db, row, content)
-    except Exception as exc:
+    except Exception:
         db.update("documents", row["id"], {"status": "failed", "error": "Could not queue this file. Retry the upload."})
         raise
 

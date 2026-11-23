@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from qdrant_client import QdrantClient, models
+from qdrant_client import QdrantClient
 
 from app import processing, rag, vectors
 from app.chunking import SemanticChunker

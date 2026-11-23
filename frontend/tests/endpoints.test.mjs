@@ -9,7 +9,7 @@ for (const [name, env] of Object.entries({
   local: {}, production: { VITE_BACKEND_URL: 'https://research-rag-xmv4.onrender.com' },
   slash: { VITE_BACKEND_URL: 'https://research-rag-xmv4.onrender.com/api/' },
 })) {
-  await build({ stdin: { contents: `export { api } from './src/lib/api'; export { apiUrl, BACKEND_URL, responseError } from './src/lib/endpoints';`,
+  await build({ stdin: { contents: `export { api } from './src/lib/api'; export { apiUrl, responseError } from './src/lib/endpoints';`,
     resolveDir: process.cwd(), loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', packages: 'external',
     define: { 'import.meta.env': JSON.stringify(env) }, outfile: `.cache/endpoint-tests/${name}.mjs` });
   modules[name] = await import(`../.cache/endpoint-tests/${name}.mjs`);

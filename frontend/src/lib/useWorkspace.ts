@@ -118,7 +118,7 @@ export function useWorkspace() {
     if (operation.current) return;
     setSelected(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id].slice(0, 30));
   }
-  return { documents, conversations, active, messages, selected, readySelected, loading, busy, uploading: files.uploading,
+  return { documents, conversations, active, messages, readySelected, loading, busy, uploading: files.uploading,
     fileActions: files.actions, error, pending, mode, scope,
     setMode, setScope, setError, refresh, openConversation, newConversation, renameConversation, deleteConversation,
     upload: files.upload, retryDocument: files.retry, deleteDocument: files.remove, send, toggleSource };

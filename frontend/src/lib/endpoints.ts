@@ -1,5 +1,5 @@
 const configured = import.meta.env?.VITE_BACKEND_URL?.trim() || 'http://127.0.0.1:8000';
-export const BACKEND_URL = configured.replace(/\/+$/, '').replace(/\/api$/, '');
+const BACKEND_URL = configured.replace(/\/+$/, '').replace(/\/api$/, '');
 
 export const apiUrl = (path: string) => `${BACKEND_URL}/api${path.startsWith('/') ? path : `/${path}`}`;
 

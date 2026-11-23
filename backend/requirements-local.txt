@@ -1,2 +1,0 @@
-# Compatibility alias for the CPU reranking runtime.
--r requirements-rerank.txt
