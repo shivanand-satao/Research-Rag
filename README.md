@@ -10,7 +10,8 @@ Python 3.12 and Node.js 22 are recommended. Local URLs belong in `frontend/.env`
 # Terminal 1, from this directory
 cd backend
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-rerank.txt
+.\.venv\Scripts\python.exe -m app.onnx_reranker
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 # Terminal 2, from this directory
@@ -21,9 +22,9 @@ npm.cmd run dev
 
 Open `http://127.0.0.1:5173`. On macOS/Linux, use `.venv/bin/python` and `npm` in the corresponding commands. If Vite uses another port, set `RESEARCH_REDIRECT_URL` and `CORS_ORIGINS` in `backend/.env`, and allow the matching callback URL in Supabase Auth settings.
 
-`backend/requirements.txt` installs only the cloud runtime: the API, Qdrant client, MiniLM tokenizer, native PDF/Word extraction, and PDF preview support. It does not install Torch, transformers, sentence-transformers, OCR packages, or pytest. Pillow remains required for text/Word PDF previews. Cloud mode uses the `tokenizers` library and the MiniLM `tokenizer.json`; no local neural model weights are needed.
+`backend/requirements.txt` installs the base cloud runtime: the API, Qdrant client, MiniLM tokenizer, native PDF/Word extraction, and PDF preview support. `requirements-rerank.txt` includes that runtime plus CPU ONNX Runtime for the enabled L-2 cross-encoder. Neither installs Torch, transformers, sentence-transformers, OCR packages, or pytest. Pillow remains required for text/Word PDF previews. Embeddings run in Qdrant Cloud; the separate local reranker uses a quantized ONNX model of about 16 MB.
 
-Optional installs are separate: `requirements-local.txt` for CPU cross-encoder reranking, `requirements-ocr.txt` for OCR (also needs the Tesseract executable), and `requirements-dev.txt` for tests. Reranking requires the optional local dependency group; OCR and reranking are disabled in the production profile.
+`requirements-local.txt` is a compatibility alias for `requirements-rerank.txt`. `requirements-ocr.txt` adds OCR (also needs the Tesseract executable), and `requirements-dev.txt` adds tests. Reranking is enabled in local defaults and the production profile; OCR remains disabled. To run only the base runtime, set `RESEARCH_RERANK_ENABLED=false` and install `requirements.txt`.
 
 ## Vercel and Render
 
@@ -35,16 +36,30 @@ The checked-in production environment files contain public URLs and feature flag
 | Vercel | Build Command / Output | `npm run build` / `dist` |
 | Vercel | `VITE_BACKEND_URL` | `https://research-rag-xmv4.onrender.com` |
 | Render | Root Directory | `backend` |
-| Render | Build Command | `pip install -r requirements.txt` |
+| Render | Build Command | `pip install -r requirements-rerank.txt && python -m app.onnx_reranker` |
 | Render | Start Command | `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Render | Health Check Path | `/api/health` |
 | Render | `APP_ENV` / `PYTHON_VERSION` | `production` / `3.12.12` |
 | Render | `FRONTEND_URL` | `https://research-rag-steel.vercel.app` |
 | Render | `RESEARCH_REDIRECT_URL` | `https://research-rag-steel.vercel.app/auth/callback` |
 | Render | `CORS_ORIGINS` | `https://research-rag-steel.vercel.app` |
-| Render | `RESEARCH_RERANK_ENABLED` / `OCR` | `false` / `false` |
+| Render | `RESEARCH_RERANK_ENABLED` / `OCR` | `true` / `false` |
+| Render | `RESEARCH_RERANK_MODEL` | `cross-encoder/ms-marco-MiniLM-L-2-v2` |
+| Render | `RESEARCH_RERANK_REVISION` | `1b5cd67b15209f24824c50370e0397743aa9b787` |
+| Render | `RESEARCH_RERANK_ONNX_FILE` | `onnx/model_quint8_avx2.onnx` |
+| Render | `RESEARCH_RERANK_BATCH_SIZE` | `4` |
+| Render | `TOKENIZERS_PARALLELISM` | `false` |
+| Render | `OPENBLAS_NUM_THREADS` / `OMP_NUM_THREADS` | `1` / `1` |
 
-`render.yaml` provides the backend deployment configuration. For an existing manually created service, copy the settings above or apply it as a Render Blueprint. Supply `SUPABASE_URL`, `SUPABASE_KEY` (or `SUPABASE_ANON_KEY`), `QDRANT_URL`, `QDRANT_API_KEY`, and `GROQ_API_KEY` in Render. Use a single backend worker because file-job coordination runs inside the process. Clear the Render build cache when switching from the old full dependency set, then redeploy. Redeploy Vercel after changing `VITE_BACKEND_URL`, since Vite embeds it at build time.
+`render.yaml` provides the backend deployment configuration. For an existing manually created service, copy the settings above or apply it as a Render Blueprint. Supply `SUPABASE_URL`, `SUPABASE_KEY` (or `SUPABASE_ANON_KEY`), `QDRANT_URL`, `QDRANT_API_KEY`, and `GROQ_API_KEY` in Render. Use a single backend worker because file-job coordination runs inside the process. Clear the Render build cache when switching dependency sets, then redeploy. Redeploy Vercel after changing `VITE_BACKEND_URL`, since Vite embeds it at build time.
+
+For the existing 512 MB Free/Starter backend, commit and push these changes, update the Render Build Command and environment settings in the table, then use **Clear build cache & deploy**. Existing dashboard values such as `RESEARCH_RERANK_ENABLED=false` override `.env.production`, so update them explicitly. A manually created service does not automatically apply `render.yaml` changes.
+
+The build downloads only the pinned ONNX export and its tokenizer, runs a real inference check, and caches the embedding tokenizer. A download or model-validation failure stops the build. These files ship with the build; a restart of that release can load them from its local cache. At runtime the reranker uses one CPU thread, batches of four, a 512-token query/passage limit, and serializes concurrent inference calls to limit memory. It reranks all available candidates, up to 40, before selecting the final contexts.
+
+After deploying, open `https://research-rag-xmv4.onrender.com/api/health` and confirm `rerank_enabled: true`, `rerank_backend: "onnx-cpu"`, and `rerank_status: "ready"`. Startup can briefly report `"loading"`. `"unavailable"` means initialization failed; inspect Render logs for the exception type. Questions continue using the selected search mode if the model is loading or fails. Successful reranking logs the candidate count without logging document content.
+
+The 16 MB model size is a disk size, not the total server RAM requirement. Check Render memory and response time while asking questions and uploading documents. If memory spikes, first reduce `RESEARCH_RERANK_BATCH_SIZE` to `1`. A 512 MB instance has limited room for concurrent uploads, extraction, and large lexical scans; sustained production traffic may require more RAM. Free services also sleep and have an ephemeral filesystem. Use a paid service with persistent storage for durable file-job caches, or an external queue/storage before scaling workers. This reranker change requires no Qdrant reindexing, document re-upload, or Supabase migration.
 
 In Supabase Authentication URL Configuration, set the production Site URL to `https://research-rag-steel.vercel.app` and allow `https://research-rag-steel.vercel.app/auth/callback` plus the recovery variant ending in `?recovery=1`. Keep localhost entries if local development is still needed.
 
@@ -91,17 +106,19 @@ See `backend/.env.example`. The existing environment supports the following sett
 | `RESEARCH_STORAGE_BUCKET` | Defaults to `research-documents`; must match your migration |
 | `RESEARCH_REDIRECT_URL` | Defaults to `${FRONTEND_URL}/auth/callback`; can be overridden explicitly |
 | `OCR`, `OCR_LANGUAGE`, `TESSERACT_CMD` | Optional scanned PDF / embedded Word image text extraction |
-| `RESEARCH_RERANK_ENABLED`, `RESEARCH_RERANK_MODEL` | Optional cross-encoder reranking; disabled by default, requires `requirements-local.txt` when enabled |
+| `RESEARCH_RERANK_ENABLED`, `RESEARCH_RERANK_MODEL` | Cross-encoder reranking, enabled by default using `cross-encoder/ms-marco-MiniLM-L-2-v2`; install `requirements-rerank.txt` |
+| `RESEARCH_RERANK_REVISION`, `RESEARCH_RERANK_ONNX_FILE` | Fixed model revision and quantized CPU ONNX file; update both when changing models |
+| `RESEARCH_RERANK_BATCH_SIZE` | Inference batch size, default 4, bounded to 1–8; use 1 for less peak memory |
 | `RESEARCH_CHILD_TOKENS`, `RESEARCH_PARENT_TOKENS` | Token ceilings, configured as 360 / 1,600 by default; child text is always capped at 254 content tokens for MiniLM |
 | `RESEARCH_CONTEXT_TOKENS` | Retrieval context token ceiling, defaulting to 12,000; the search candidate limit is fixed at 40 |
 
-Indexing always sends text as Qdrant `Document` vectors using `sentence-transformers/all-minilm-l6-v2`, and semantic/hybrid searches send a `Document` query, with `cloud_inference=True` on the client. Enable inference on your Qdrant Cloud cluster and use an API key with the required access. The app downloads only the small MiniLM tokenizer files for chunk/context token accounting, cached in `backend/.cache/tokenizers`; embedding inference runs in Qdrant Cloud. An inference failure is reported on the affected file.
+Indexing always sends text as Qdrant `Document` vectors using `sentence-transformers/all-minilm-l6-v2`, and semantic/hybrid searches send a `Document` query, with `cloud_inference=True` on the client. Enable inference on your Qdrant Cloud cluster and use an API key with the required access. For embeddings, the app downloads only the small MiniLM tokenizer files for chunk/context token accounting, cached in `backend/.cache/tokenizers`; embedding inference runs in Qdrant Cloud. An inference failure is reported on the affected file.
 
 MiniLM's 256-token context window is the input limit for each text being embedded, not a requests-per-minute allowance. Both chunks and cloud search queries reserve two special tokens and use at most 254 content tokens. Qdrant embeds/searches the source text; Groq generates the answer. An **answer-generation HTTP 429** therefore refers to Groq's token/request quotas. Short cooldowns use bounded retries; longer cooldowns return HTTP 429 with `Retry-After` and the wait time, and repeated requests share the same cooldown. Requests that exceed the provider's per-request allowance are reported separately. Account quotas still apply.
 
 MiniLM embeddings have 384 dimensions. Previously uploaded sources queue background reindexing from their retained originals on the next question if they use an incompatible model or an outdated index. Model payload checks and search filters prevent mixing incompatible vectors. No Supabase migration is required. The former `QDRANT_ALL_MINILM_L6_V2` switch and local embedding settings are no longer used.
 
-The optional cross-encoder remains a separate reranking model. When explicitly enabled with its optional dependencies installed, it prepares in a background thread on startup; answers use hybrid ranking while it loads or if it is unavailable. Its download is cached in `backend/.cache/reranker`. OCR needs the optional OCR dependencies and Tesseract executable; `pytesseract` alone is insufficient. Image interpretation is not implemented; OCR extracts text from images.
+The L-2 cross-encoder is a separate reranking model, served through quantized CPU ONNX inference. It prepares in a background thread on startup; answers use the selected search ranking while it loads or if it is unavailable. Its two downloaded assets are cached in `backend/.cache/reranker`. The model is trained for English passage relevance; quantization and its smaller size trade some ranking quality for lower resource use. OCR needs the optional OCR dependencies and Tesseract executable; `pytesseract` alone is insufficient. Image interpretation is not implemented; OCR extracts text from images.
 
 ## Research workflow
 

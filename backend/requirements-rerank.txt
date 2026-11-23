@@ -1,0 +1,3 @@
+# Quantized CPU cross-encoder runtime for local development and Render (no Torch).
+-r requirements.txt
+onnxruntime==1.23.2

@@ -6,7 +6,7 @@ import threading
 
 from fastapi import HTTPException
 
-from .config import BACKEND, settings
+from .config import settings
 from .schemas import ChatRequest
 from .generation import complete, estimate_tokens, estimate_messages
 from .vectors import embedding_tokenizer, fuse, vector_store
@@ -14,6 +14,7 @@ from .vectors import embedding_tokenizer, fuse, vector_store
 logger = logging.getLogger(__name__)
 _rerank_model = None
 _rerank_started = False
+_rerank_status = "not_started"
 _rerank_lock = threading.Lock()
 
 RETRIEVAL_CANDIDATES = 40
@@ -37,27 +38,31 @@ ANSWER_SYSTEM = (
 
 def prepare_reranker():
     """Warm the optional cross-encoder in the background, without stalling answers."""
-    global _rerank_model, _rerank_started
+    global _rerank_model, _rerank_started, _rerank_status
     with _rerank_lock:
         if _rerank_started:
             return
         _rerank_started = True
+        _rerank_status = "loading"
     try:
-        from sentence_transformers import CrossEncoder
-        try:
-            _rerank_model = CrossEncoder(settings.rerank_model, local_files_only=True, max_length=512)
-        except Exception:
-            _rerank_model = CrossEncoder(settings.rerank_model,
-                cache_dir=str(BACKEND / ".cache" / "reranker"), max_length=512)
-        logger.info("Cross-encoder reranking is ready")
+        from .onnx_reranker import load_reranker
+        _rerank_model = load_reranker()
+        _rerank_status = "ready"
+        logger.info("Quantized ONNX cross-encoder reranking is ready (%s)", settings.rerank_model)
     except ImportError:
-        logger.warning("Reranking requires requirements-local.txt; using hybrid ranking without a local model")
+        _rerank_status = "unavailable"
+        logger.warning("Reranking requires requirements-rerank.txt; using the search ranking")
     except Exception as exc:
-        logger.warning("Cross-encoder preparation unavailable (%s); hybrid search remains active", type(exc).__name__)
+        _rerank_status = "unavailable"
+        logger.warning("Cross-encoder preparation unavailable (%s); using the search ranking", type(exc).__name__)
 
 
 def reranker():
     return _rerank_model
+
+
+def reranker_status():
+    return _rerank_status if settings.rerank else "disabled"
 
 
 def normalize_citations(text: str) -> str:
@@ -208,10 +213,11 @@ def answer_question(request: ChatRequest, user_id: str, document_ids: list[str],
         try:
             model = reranker()
             if model is not None:
-                scores = model.predict([(question[:1500], chunk["text"]) for chunk in chunks], batch_size=8)
+                scores = model.predict([(question[:1500], chunk["text"]) for chunk in chunks], batch_size=settings.rerank_batch_size)
                 chunks = [chunk for _, chunk in sorted(zip(scores, chunks), key=lambda item: float(item[0]), reverse=True)]
+                logger.info("Reranked %d candidates with %s", len(chunks), settings.rerank_model)
         except Exception as exc:
-            logger.warning("Reranking unavailable (%s); using hybrid ranking", type(exc).__name__)
+            logger.warning("Reranking unavailable (%s); using the search ranking", type(exc).__name__)
     candidates = chunks
     recent = compact_history(history)
     metadata = [{**chunk, "text": ""} for chunk in candidates[:max(request.top_k, len(document_ids)) if across else request.top_k]]

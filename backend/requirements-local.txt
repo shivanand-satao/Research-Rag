@@ -1,5 +1,2 @@
-# Optional CPU cross-encoder reranking.
--r requirements.txt
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.7.1+cpu
-sentence-transformers==3.4.1
+# Compatibility alias for the CPU reranking runtime.
+-r requirements-rerank.txt

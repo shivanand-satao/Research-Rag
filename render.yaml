@@ -3,7 +3,7 @@ services:
     name: research-rag
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-rerank.txt && python -m app.onnx_reranker
     startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
@@ -18,7 +18,21 @@ services:
       - key: CORS_ORIGINS
         value: https://research-rag-steel.vercel.app
       - key: RESEARCH_RERANK_ENABLED
+        value: "true"
+      - key: RESEARCH_RERANK_MODEL
+        value: cross-encoder/ms-marco-MiniLM-L-2-v2
+      - key: RESEARCH_RERANK_REVISION
+        value: 1b5cd67b15209f24824c50370e0397743aa9b787
+      - key: RESEARCH_RERANK_ONNX_FILE
+        value: onnx/model_quint8_avx2.onnx
+      - key: RESEARCH_RERANK_BATCH_SIZE
+        value: "4"
+      - key: TOKENIZERS_PARALLELISM
         value: "false"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
       - key: OCR
         value: "false"
       - key: SUPABASE_URL

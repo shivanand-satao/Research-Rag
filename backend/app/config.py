@@ -10,6 +10,8 @@ PRODUCTION = os.getenv("APP_ENV", "").strip().lower() == "production" or os.gete
 load_dotenv(BACKEND / (".env.production" if PRODUCTION else ".env"))
 
 QDRANT_MINILM_MODEL = "sentence-transformers/all-minilm-l6-v2"
+RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-2-v2"
+RERANK_REVISION = "1b5cd67b15209f24824c50370e0397743aa9b787"
 FRONTEND_URL = (os.getenv("FRONTEND_URL") or "http://127.0.0.1:5173").rstrip("/")
 
 
@@ -33,8 +35,11 @@ class Settings:
     ocr: bool = os.getenv("OCR", "false").lower() == "true"
     ocr_language: str = os.getenv("OCR_LANGUAGE", "eng")
     tesseract_cmd: str = os.getenv("TESSERACT_CMD", "")
-    rerank: bool = os.getenv("RESEARCH_RERANK_ENABLED", "false").lower() == "true"
-    rerank_model: str = os.getenv("RESEARCH_RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+    rerank: bool = os.getenv("RESEARCH_RERANK_ENABLED", "true").lower() == "true"
+    rerank_model: str = os.getenv("RESEARCH_RERANK_MODEL", RERANK_MODEL)
+    rerank_revision: str = os.getenv("RESEARCH_RERANK_REVISION", RERANK_REVISION)
+    rerank_onnx_file: str = os.getenv("RESEARCH_RERANK_ONNX_FILE", "onnx/model_quint8_avx2.onnx")
+    rerank_batch_size: int = max(1, min(8, int(os.getenv("RESEARCH_RERANK_BATCH_SIZE", "4"))))
     child_tokens: int = int(os.getenv("RESEARCH_CHILD_TOKENS", "360"))
     parent_tokens: int = int(os.getenv("RESEARCH_PARENT_TOKENS", "1600"))
     context_tokens: int = int(os.getenv("RESEARCH_CONTEXT_TOKENS", "12000"))

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import client
 from .routes import router
-from .rag import prepare_reranker
+from .rag import prepare_reranker, reranker_status
 from .document_jobs import start_cleanup
 
 
@@ -34,5 +34,8 @@ def health():
     return {"status": "ok", "app": "Research RAG", "supabase_configured": bool(settings.supabase_url and settings.supabase_key),
         "generation_configured": bool(settings.groq_key),
         "embedding_provider": "qdrant-cloud",
-        "rerank_enabled": settings.rerank}
+        "rerank_enabled": settings.rerank,
+        "rerank_model": settings.rerank_model,
+        "rerank_backend": "onnx-cpu",
+        "rerank_status": reranker_status()}
 
